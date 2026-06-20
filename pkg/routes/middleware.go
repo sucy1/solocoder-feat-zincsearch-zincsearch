@@ -77,6 +77,10 @@ func IndexAliasMiddleware(c *gin.Context) {
 	if isWrite {
 		writeIndex, ok := core.ZINC_INDEX_ALIAS_LIST.GetWriteIndexForAlias(target)
 		if ok {
+			if _, exists := core.ZINC_INDEX_LIST.Get(writeIndex); !exists {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "alias [" + target + "] points to non-existent index [" + writeIndex + "]"})
+				return
+			}
 			c.Params[ix].Value = writeIndex
 		}
 	} else {
@@ -85,10 +89,17 @@ func IndexAliasMiddleware(c *gin.Context) {
 			c.Next()
 			return
 		}
-		newTarget := strings.Join(indexes, ",")
-		if newTarget != "" {
-			c.Params[ix].Value = newTarget
+		var existingIndexes []string
+		for _, idx := range indexes {
+			if _, exists := core.ZINC_INDEX_LIST.Get(idx); exists {
+				existingIndexes = append(existingIndexes, idx)
+			}
 		}
+		if len(existingIndexes) == 0 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "alias [" + target + "] points to no existing indexes"})
+			return
+		}
+		c.Params[ix].Value = strings.Join(existingIndexes, ",")
 	}
 	c.Next()
 }

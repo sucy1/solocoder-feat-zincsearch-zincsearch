@@ -27,7 +27,7 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
-var templateParamRegex = regexp.MustCompile(`\{\{\s*(\w+)\s*\}\}`)
+var templateParamRegex = regexp.MustCompile(`\{\{\s*(\w+)(?::([^}]*))?\s*\}\}`)
 
 func ListSearchTemplates() ([]*meta.SearchTemplate, error) {
 	templates, err := metadata.SearchTemplate.List(0, 0)
@@ -124,8 +124,16 @@ func RenderSearchTemplate(template string, params map[string]interface{}) (strin
 			return match
 		}
 		paramName := strings.TrimSpace(submatches[1])
+		defaultValue := ""
+		if len(submatches) >= 3 {
+			defaultValue = strings.TrimSpace(submatches[2])
+		}
+
 		value, ok := params[paramName]
 		if !ok {
+			if defaultValue != "" {
+				return defaultValue
+			}
 			return match
 		}
 

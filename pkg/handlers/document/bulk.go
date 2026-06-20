@@ -136,11 +136,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 		StartTime:   time.Now(),
 	}
 
-	// Prepare to read the entire raw text of the body
 	scanner := bufio.NewScanner(body)
 
-	// Set 1 MB max per line. docs at - https://pkg.go.dev/bufio#pkg-constants
-	// This is the max size of a line in a file that we will process
 	maxCapacityPerLine := config.Global.MaxDocumentSize
 	buf := make([]byte, maxCapacityPerLine)
 	scanner.Buffer(buf, maxCapacityPerLine)
@@ -149,19 +146,19 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	lastLineMetaData := make(map[string]interface{})
 
 	var doc map[string]interface{}
-	var err error
-	for scanner.Scan() { // Read each line
+	var firstErr error
+	for scanner.Scan() {
 		for k := range doc {
 			delete(doc, k)
 		}
-		if err = json.Unmarshal(scanner.Bytes(), &doc); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &doc); err != nil {
 			log.Error().Msgf("bulk.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
+			progress.Processed++
 			progress.FailedCount++
+			progress.Report(false)
 			continue
 		}
 
-		// This will process the data line in the request. Each data line is preceded by a metadata line.
-		// Docs at https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-bulk.html
 		if nextLineIsData {
 			bulkRes.Count++
 			progress.Processed++
@@ -188,7 +185,6 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			indexName := suppliedIndexName.(string)
 			operation := suppliedOperation.(string)
 
-			docErr := error(nil)
 			switch operation {
 			case "index":
 				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
@@ -209,19 +205,25 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			if err != nil {
 				progress.FailedCount++
 				progress.Report(false)
-				return bulkRes, err
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
 			}
 
-			docErr = newIndex.CreateDocument(docID, doc, update)
+			docErr := newIndex.CreateDocument(docID, doc, update)
 			if docErr != nil {
 				progress.FailedCount++
+				if firstErr == nil {
+					firstErr = docErr
+				}
 			} else {
 				progress.SuccessCount++
 			}
 
 			progress.Report(false)
 
-		} else { // This branch will process the metadata line in the request. Each metadata line is preceded by a data line.
+		} else {
 
 			for k, v := range doc {
 				vm, ok := v.(map[string]interface{})
@@ -235,7 +237,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					nextLineIsData = true
 					lastLineMetaData["operation"] = k
 
-					if vm["_index"] != "" { // if index is specified in metadata then it overtakes the index in the query path
+					if vm["_index"] != "" {
 						lastLineMetaData["_index"] = vm["_index"]
 					} else {
 						lastLineMetaData["_index"] = target
@@ -248,7 +250,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					nextLineIsData = false
 					docID := vm["_id"].(string)
 					indexName := target
-					if vm["_index"] != "" { // if index is specified in metadata then it overtakes the index in the query path
+					if vm["_index"] != "" {
 						indexName = vm["_index"].(string)
 					}
 					if indexName == "" {
@@ -256,17 +258,23 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					}
 
 					newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
-					if err != nil {
-						progress.Report(false)
-						return bulkRes, err
-					}
-
-					// delete
-					delErr := newIndex.DeleteDocument(docID)
 					bulkRes.Count++
 					progress.Processed++
+					if err != nil {
+						progress.FailedCount++
+						progress.Report(false)
+						if firstErr == nil {
+							firstErr = err
+						}
+						continue
+					}
+
+					delErr := newIndex.DeleteDocument(docID)
 					if delErr != nil {
 						progress.FailedCount++
+						if firstErr == nil {
+							firstErr = delErr
+						}
 					} else {
 						progress.SuccessCount++
 					}
@@ -288,7 +296,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	}
 
 	progress.FinalReport()
-	return bulkRes, nil
+	return bulkRes, firstErr
 }
 
 // DoesExistInThisRequest takes a slice and looks for an element in it. If found it will
