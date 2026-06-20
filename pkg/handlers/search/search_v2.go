@@ -163,6 +163,13 @@ func searchIndex(indexNames []string, query *meta.ZincQuery) (*meta.SearchRespon
 	var err error
 	var resp *meta.SearchResponse
 	if indexName == "" || strings.HasSuffix(indexName, "*") || strings.HasPrefix(indexName, "*") || len(indexNames) > 1 {
+		for _, name := range indexNames {
+			if name != "" && !strings.HasSuffix(name, "*") && !strings.HasPrefix(name, "*") {
+				if _, exists := core.GetIndex(name); !exists {
+					return nil, fmt.Errorf("index %s does not exists", name)
+				}
+			}
+		}
 		resp, err = core.MultiSearch(indexNames, query)
 	} else {
 		index, exists := core.GetIndex(indexName)

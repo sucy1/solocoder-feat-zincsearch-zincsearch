@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/blugelabs/bluge/analysis"
-	"github.com/blugelabs/bluge/analysis/token"
 
 	"github.com/zincsearch/zincsearch/pkg/errors"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
@@ -153,9 +152,8 @@ func (f *SynonymTokenFilter) Filter(input analysis.TokenStream) analysis.TokenSt
 					PositionIncr: 0,
 					Start:        tok.Start,
 					End:          tok.Start + len(synTerm),
-					Position:     tok.Position,
-					Type:         token.Synonym,
-					Keyword:      tok.Keyword,
+					Type:         tok.Type,
+					KeyWord:      tok.KeyWord,
 				}
 				output = append(output, newTok)
 			}

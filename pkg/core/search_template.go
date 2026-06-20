@@ -28,6 +28,7 @@ import (
 )
 
 var templateParamRegex = regexp.MustCompile(`\{\{\s*(\w+)(?::([^}]*))?\s*\}\}`)
+var templateParamWithDefaultRegex = regexp.MustCompile(`\{\{\s*(\w+):([^}]*)\s*\}\}`)
 
 func ListSearchTemplates() ([]*meta.SearchTemplate, error) {
 	templates, err := metadata.SearchTemplate.List(0, 0)
@@ -118,35 +119,39 @@ func RenderSearchTemplate(template string, params map[string]interface{}) (strin
 		return "", errors.New(errors.ErrorTypeParsingException, "template is empty")
 	}
 
+	inlineDefaults := make(map[string]string)
+	for _, match := range templateParamWithDefaultRegex.FindAllStringSubmatch(template, -1) {
+		if len(match) >= 3 {
+			inlineDefaults[match[1]] = match[2]
+		}
+	}
+
 	result := templateParamRegex.ReplaceAllStringFunc(template, func(match string) string {
 		submatches := templateParamRegex.FindStringSubmatch(match)
 		if len(submatches) < 2 {
 			return match
 		}
 		paramName := strings.TrimSpace(submatches[1])
-		defaultValue := ""
-		if len(submatches) >= 3 {
-			defaultValue = strings.TrimSpace(submatches[2])
-		}
 
 		value, ok := params[paramName]
-		if !ok {
-			if defaultValue != "" {
-				return defaultValue
+		if ok {
+			switch v := value.(type) {
+			case string:
+				return v
+			default:
+				b, err := json.Marshal(v)
+				if err != nil {
+					return match
+				}
+				return string(b)
 			}
-			return match
 		}
 
-		switch v := value.(type) {
-		case string:
-			return v
-		default:
-			b, err := json.Marshal(v)
-			if err != nil {
-				return match
-			}
-			return string(b)
+		if def, hasDef := inlineDefaults[paramName]; hasDef {
+			return strings.TrimSpace(def)
 		}
+
+		return match
 	})
 
 	remainingMatches := templateParamRegex.FindAllString(result, -1)
@@ -179,11 +184,17 @@ func RenderSearchTemplateWithDefaults(name string, params map[string]interface{}
 	}
 
 	mergedParams := make(map[string]interface{})
-	for k, v := range tpl.Params {
-		mergedParams[k] = v
+	if tpl.Params != nil {
+		for k, v := range tpl.Params {
+			if v != nil {
+				mergedParams[k] = v
+			}
+		}
 	}
-	for k, v := range params {
-		mergedParams[k] = v
+	if params != nil {
+		for k, v := range params {
+			mergedParams[k] = v
+		}
 	}
 
 	return RenderSearchTemplate(tpl.Template, mergedParams)

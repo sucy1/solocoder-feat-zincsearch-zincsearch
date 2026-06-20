@@ -153,9 +153,9 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &doc); err != nil {
 			log.Error().Msgf("bulk.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
-			progress.Processed++
-			progress.FailedCount++
-			progress.Report(false)
+			if nextLineIsData {
+				nextLineIsData = false
+			}
 			continue
 		}
 
@@ -182,32 +182,23 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			if suppliedOperation == nil && len(target) > 0 {
 				suppliedOperation = "create"
 			}
-			indexName := suppliedIndexName.(string)
-			operation := suppliedOperation.(string)
+			indexName, _ := suppliedIndexName.(string)
+			operation, _ := suppliedOperation.(string)
 
-			switch operation {
-			case "index":
-				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-					"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "created", nil),
-				})
-			case "create":
-				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-					"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "created", nil),
-				})
-			case "update":
-				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-					"index": NewBulkResponseItem(bulkRes.Count, indexName, docID, "updated", nil),
-				})
-			default:
-			}
+			newIndex, createErr := func() (*core.Index, error) {
+				idx, _, err := core.GetOrCreateIndex(indexName, "", 0)
+				return idx, err
+			}()
 
-			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
-			if err != nil {
+			if createErr != nil {
 				progress.FailedCount++
 				progress.Report(false)
 				if firstErr == nil {
-					firstErr = err
+					firstErr = createErr
 				}
+				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+					operation: NewBulkResponseItem(bulkRes.Count, indexName, docID, "error", createErr),
+				})
 				continue
 			}
 
@@ -217,8 +208,14 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 				if firstErr == nil {
 					firstErr = docErr
 				}
+				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+					operation: NewBulkResponseItem(bulkRes.Count, indexName, docID, "error", docErr),
+				})
 			} else {
 				progress.SuccessCount++
+				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+					operation: NewBulkResponseItem(bulkRes.Count, indexName, docID, "created", nil),
+				})
 			}
 
 			progress.Report(false)
@@ -248,38 +245,46 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 					lastLineMetaData["_id"] = vm["_id"]
 				} else if k == "delete" {
 					nextLineIsData = false
-					docID := vm["_id"].(string)
+					docID, _ := vm["_id"].(string)
 					indexName := target
 					if vm["_index"] != "" {
-						indexName = vm["_index"].(string)
+						indexName, _ = vm["_index"].(string)
 					}
 					if indexName == "" {
 						return nil, errors.New("bulk index data format error")
 					}
 
-					newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
 					bulkRes.Count++
 					progress.Processed++
-					if err != nil {
+
+					newIndex, delErr := func() (*core.Index, error) {
+						idx, _, err := core.GetOrCreateIndex(indexName, "", 0)
+						return idx, err
+					}()
+
+					if delErr != nil {
 						progress.FailedCount++
 						progress.Report(false)
 						if firstErr == nil {
-							firstErr = err
+							firstErr = delErr
 						}
+						bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
+							"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "error", delErr),
+						})
 						continue
 					}
 
-					delErr := newIndex.DeleteDocument(docID)
-					if delErr != nil {
+					docErr := newIndex.DeleteDocument(docID)
+					if docErr != nil {
 						progress.FailedCount++
 						if firstErr == nil {
-							firstErr = delErr
+							firstErr = docErr
 						}
 					} else {
 						progress.SuccessCount++
 					}
 					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "deleted", delErr),
+						"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "deleted", docErr),
 					})
 					progress.Report(false)
 				} else {

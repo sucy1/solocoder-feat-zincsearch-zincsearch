@@ -62,6 +62,7 @@ func init() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error loading alias")
 	}
+	ZINC_INDEX_ALIAS_LIST.writeCursor = make(map[string]*uint64)
 }
 
 func (t *IndexList) Add(index *Index) {
