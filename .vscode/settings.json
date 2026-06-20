@@ -1,0 +1,17 @@
+{
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "eslint.validate": [
+        "javascript",
+        "javascriptreact",
+        "vue"
+    ],
+    "eslint.format.enable": true,
+    "eslint.workingDirectories": [
+        "./web"
+    ],
+    "[powershell]": {
+        "editor.defaultFormatter": "ms-vscode.powershell"
+    }
+}
