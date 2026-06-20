@@ -34,6 +34,16 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
+const DefaultReportEvery = 1000
+
+type BulkProgress struct {
+	ReportEvery  int64
+	Processed    int64
+	SuccessCount int64
+	FailedCount  int64
+	StartTime    time.Time
+}
+
 // Bulk accept multiple documents, first line index metadata, second line document
 //
 // @Id Bulk
@@ -90,8 +100,41 @@ func ESBulk(c *gin.Context) {
 	zutils.GinRenderJSON(c, http.StatusOK, ret)
 }
 
+func (p *BulkProgress) Report(force bool) {
+	if p.ReportEvery <= 0 {
+		p.ReportEvery = DefaultReportEvery
+	}
+	if force || p.Processed%p.ReportEvery == 0 {
+		elapsed := time.Since(p.StartTime)
+		rate := float64(p.Processed) / elapsed.Seconds()
+		log.Info().
+			Int64("processed", p.Processed).
+			Int64("success", p.SuccessCount).
+			Int64("failed", p.FailedCount).
+			Str("elapsed", elapsed.String()).
+			Float64("docs_per_sec", rate).
+			Msg("bulk import progress")
+	}
+}
+
+func (p *BulkProgress) FinalReport() {
+	elapsed := time.Since(p.StartTime)
+	rate := float64(p.Processed) / elapsed.Seconds()
+	log.Info().
+		Int64("total_processed", p.Processed).
+		Int64("total_success", p.SuccessCount).
+		Int64("total_failed", p.FailedCount).
+		Str("total_elapsed", elapsed.String()).
+		Float64("avg_docs_per_sec", rate).
+		Msg("bulk import completed")
+}
+
 func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	bulkRes := &BulkResponse{Items: []map[string]BulkResponseItem{}}
+	progress := &BulkProgress{
+		ReportEvery: DefaultReportEvery,
+		StartTime:   time.Now(),
+	}
 
 	// Prepare to read the entire raw text of the body
 	scanner := bufio.NewScanner(body)
@@ -113,6 +156,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 		}
 		if err = json.Unmarshal(scanner.Bytes(), &doc); err != nil {
 			log.Error().Msgf("bulk.json.Unmarshal: %s, err %s", scanner.Text(), err.Error())
+			progress.FailedCount++
 			continue
 		}
 
@@ -120,6 +164,7 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 		// Docs at https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-bulk.html
 		if nextLineIsData {
 			bulkRes.Count++
+			progress.Processed++
 			nextLineIsData = false
 			update := false
 
@@ -142,6 +187,8 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 			}
 			indexName := suppliedIndexName.(string)
 			operation := suppliedOperation.(string)
+
+			docErr := error(nil)
 			switch operation {
 			case "index":
 				bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
@@ -160,13 +207,19 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 			newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
 			if err != nil {
+				progress.FailedCount++
+				progress.Report(false)
 				return bulkRes, err
 			}
 
-			err = newIndex.CreateDocument(docID, doc, update)
-			if err != nil {
-				return bulkRes, err
+			docErr = newIndex.CreateDocument(docID, doc, update)
+			if docErr != nil {
+				progress.FailedCount++
+			} else {
+				progress.SuccessCount++
 			}
+
+			progress.Report(false)
 
 		} else { // This branch will process the metadata line in the request. Each metadata line is preceded by a data line.
 
@@ -204,15 +257,23 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 
 					newIndex, _, err := core.GetOrCreateIndex(indexName, "", 0)
 					if err != nil {
+						progress.Report(false)
 						return bulkRes, err
 					}
 
 					// delete
-					err = newIndex.DeleteDocument(docID)
+					delErr := newIndex.DeleteDocument(docID)
 					bulkRes.Count++
+					progress.Processed++
+					if delErr != nil {
+						progress.FailedCount++
+					} else {
+						progress.SuccessCount++
+					}
 					bulkRes.Items = append(bulkRes.Items, map[string]BulkResponseItem{
-						"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "deleted", err),
+						"delete": NewBulkResponseItem(bulkRes.Count, indexName, docID, "deleted", delErr),
 					})
+					progress.Report(false)
 				} else {
 					lastLineMetaData["_index"] = target
 					lastLineMetaData["operation"] = "index"
@@ -222,9 +283,11 @@ func BulkWorker(target string, body io.Reader) (*BulkResponse, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
+		progress.FinalReport()
 		return bulkRes, err
 	}
 
+	progress.FinalReport()
 	return bulkRes, nil
 }
 

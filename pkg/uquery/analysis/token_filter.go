@@ -135,6 +135,18 @@ func RequestTokenFilterSingle(name string, options interface{}) (analysis.TokenF
 		return zinctoken.NewTrimTokenFilter()
 	case "stop":
 		return zinctoken.NewStopTokenFilter(options)
+	case "synonym", "synonym_graph":
+		filter, err := zinctoken.NewSynonymTokenFilter(options)
+		if err != nil {
+			return nil, err
+		}
+		if sf, ok := filter.(*zinctoken.SynonymTokenFilter); ok {
+			name, _ := zutils.GetStringFromMap(options, "name")
+			if name != "" {
+				zinctoken.RegisterSynonymFilter(name, sf)
+			}
+		}
+		return filter, nil
 	case "truncate":
 		return zinctoken.NewTruncateTokenFilter(options)
 	case "unicodenorm":

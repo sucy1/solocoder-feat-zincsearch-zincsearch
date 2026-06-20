@@ -17,6 +17,7 @@ package core
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog/log"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
@@ -26,12 +27,45 @@ import (
 var ZINC_INDEX_ALIAS_LIST AliasList
 
 type AliasList struct {
-	lock    sync.RWMutex
-	Aliases map[string][]string
+	lock        sync.RWMutex
+	Aliases     map[string][]string
+	writeCursor map[string]*uint64
 }
 
 func NewAliasList() *AliasList {
-	return &AliasList{Aliases: map[string][]string{}}
+	return &AliasList{Aliases: map[string][]string{}, writeCursor: map[string]*uint64{}}
+}
+
+func (al *AliasList) GetWriteIndexForAlias(aliasName string) (string, bool) {
+	al.lock.RLock()
+	indexes, ok := al.Aliases[aliasName]
+	if !ok || len(indexes) == 0 {
+		al.lock.RUnlock()
+		return "", false
+	}
+	if len(indexes) == 1 {
+		al.lock.RUnlock()
+		return indexes[0], true
+	}
+
+	cursor, exists := al.writeCursor[aliasName]
+	if !exists {
+		al.lock.RUnlock()
+		al.lock.Lock()
+		if _, exists := al.writeCursor[aliasName]; !exists {
+			var zero uint64 = 0
+			al.writeCursor[aliasName] = &zero
+		}
+		cursor = al.writeCursor[aliasName]
+		al.lock.Unlock()
+		al.lock.RLock()
+		indexes = al.Aliases[aliasName]
+	}
+	next := atomic.AddUint64(cursor, 1) - 1
+	idx := int(next % uint64(len(indexes)))
+	result := indexes[idx]
+	al.lock.RUnlock()
+	return result, true
 }
 
 func (al *AliasList) AddIndexesToAlias(alias string, indexes []string) error {

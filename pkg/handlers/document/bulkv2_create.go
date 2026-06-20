@@ -17,6 +17,7 @@ package document
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -73,6 +74,11 @@ func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 		return count, err
 	}
 
+	progress := &BulkProgress{
+		ReportEvery: DefaultReportEvery,
+		StartTime:   time.Now(),
+	}
+
 	for _, doc := range body.Records { // Read each line
 		update := false
 
@@ -86,13 +92,22 @@ func Bulkv2Worker(indexName string, body meta.JSONIngest) (int64, error) {
 			update = true
 		}
 
-		err = newIndex.CreateDocument(docID, doc, update)
-		if err != nil {
-			return count, err
+		docErr := newIndex.CreateDocument(docID, doc, update)
+		progress.Processed++
+		if docErr != nil {
+			progress.FailedCount++
+		} else {
+			progress.SuccessCount++
+		}
+		progress.Report(false)
+
+		if docErr != nil {
+			err = docErr
 		}
 
 		count++
 	}
 
-	return count, nil
+	progress.FinalReport()
+	return count, err
 }

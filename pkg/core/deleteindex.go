@@ -32,16 +32,22 @@ func DeleteIndex(name string) error {
 		return errors.New("index " + name + " does not exists")
 	}
 
-	// 2. Close and Delete from cache
+	// 2. Remove index from all aliases (cleanup aliases)
+	aliases := ZINC_INDEX_ALIAS_LIST.GetAliasesForIndex(name)
+	for _, alias := range aliases {
+		_ = ZINC_INDEX_ALIAS_LIST.RemoveIndexesFromAlias(alias, []string{name})
+	}
+
+	// 3. Close and Delete from cache
 	ZINC_INDEX_LIST.Delete(name)
 
-	// 3. Physically delete the index
+	// 4. Physically delete the index
 	dataPath := config.Global.DataPath
 	err := os.RemoveAll(dataPath + "/" + index.GetName())
 	if err != nil {
 		log.Error().Err(err).Msg("failed to delete index")
 	}
 
-	// 4. Delete form metadata
+	// 5. Delete form metadata
 	return metadata.Index.Delete(name)
 }

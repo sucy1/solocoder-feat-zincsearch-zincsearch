@@ -83,7 +83,7 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 
 	// highlight
 	var highlighter *highlight.SimpleHighlighter
-	if query.Highlight != nil {
+	if query.Highlight != nil && len(query.Highlight.Fields) > 0 {
 		if len(query.Highlight.PreTags) > 0 && len(query.Highlight.PostTags) > 0 {
 			highlighter = highlight.NewHTMLHighlighterTags(query.Highlight.PreTags[0], query.Highlight.PostTags[0])
 		} else {
@@ -100,7 +100,7 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 		var sourceData map[string]interface{}
 		var fieldsData map[string]interface{}
 		var highlightData map[string]interface{}
-		if query.Highlight != nil {
+		if query.Highlight != nil && len(query.Highlight.Fields) > 0 {
 			highlightData = make(map[string]interface{})
 		}
 		err = next.VisitStoredFields(func(field string, value []byte) bool {
@@ -118,14 +118,29 @@ func searchV2(shardNum, readerNum int64, dmi search.DocumentMatchIterator, query
 				}
 			default:
 				// highlight
-				if query.Highlight != nil && query.Highlight.Fields != nil {
+				if query.Highlight != nil && len(query.Highlight.Fields) > 0 {
 					if options, ok := query.Highlight.Fields[field]; ok {
 						if v, ok := next.Locations[field]; ok {
+							var fieldHighlighter *highlight.SimpleHighlighter
 							if len(options.PreTags) > 0 && len(options.PostTags) > 0 {
-								highlighter := highlight.NewHTMLHighlighterTags(options.PreTags[0], options.PostTags[0])
-								highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
+								fieldHighlighter = highlight.NewHTMLHighlighterTags(options.PreTags[0], options.PostTags[0])
 							} else {
-								highlightData[field] = highlighter.BestFragments(v, value, options.NumberOfFragments)
+								fieldHighlighter = highlighter
+							}
+							fragments := fieldHighlighter.BestFragments(v, value, options.NumberOfFragments)
+							fragmentSize := options.FragmentSize
+							if fragmentSize == 0 {
+								fragmentSize = 200
+							}
+							if len(fragments) > 0 {
+								truncatedFragments := make([]string, 0, len(fragments))
+								for _, frag := range fragments {
+									if len(frag) > fragmentSize {
+										frag = frag[:fragmentSize]
+									}
+									truncatedFragments = append(truncatedFragments, frag)
+								}
+								highlightData[field] = truncatedFragments
 							}
 						}
 					}

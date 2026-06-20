@@ -72,16 +72,41 @@ func IndexAliasMiddleware(c *gin.Context) {
 		return
 	}
 
-	indexes, ok := core.ZINC_INDEX_ALIAS_LIST.GetIndexesForAlias(target)
-	if !ok {
-		c.Next()
-		return
-	}
+	isWrite := isWriteRequest(c)
 
-	newTarget := strings.Join(indexes, ",")
-
-	if newTarget != "" {
-		c.Params[ix].Value = newTarget // set target new value in the request context
+	if isWrite {
+		writeIndex, ok := core.ZINC_INDEX_ALIAS_LIST.GetWriteIndexForAlias(target)
+		if ok {
+			c.Params[ix].Value = writeIndex
+		}
+	} else {
+		indexes, ok := core.ZINC_INDEX_ALIAS_LIST.GetIndexesForAlias(target)
+		if !ok {
+			c.Next()
+			return
+		}
+		newTarget := strings.Join(indexes, ",")
+		if newTarget != "" {
+			c.Params[ix].Value = newTarget
+		}
 	}
 	c.Next()
+}
+
+func isWriteRequest(c *gin.Context) bool {
+	path := c.Request.URL.Path
+	method := c.Request.Method
+
+	if method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete {
+		if strings.Contains(path, "/_doc") ||
+			strings.Contains(path, "/_create") ||
+			strings.Contains(path, "/_update") ||
+			strings.Contains(path, "/_bulk") ||
+			strings.Contains(path, "/_bulkv2") ||
+			strings.Contains(path, "/_multi") ||
+			strings.Contains(path, "/_delete_by_query") {
+			return true
+		}
+	}
+	return false
 }

@@ -155,6 +155,13 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/es/_msearch", AuthMiddleware("search.MultipleSearch"), ESMiddleware, IndexAliasMiddleware, search.MultipleSearch)
 	r.POST("/es/:target/_search", AuthMiddleware("search.SearchDSL"), ESMiddleware, IndexAliasMiddleware, search.SearchDSL)
 	r.POST("/es/:target/_msearch", AuthMiddleware("search.MultipleSearch"), ESMiddleware, IndexAliasMiddleware, search.MultipleSearch)
+
+	r.GET("/es/_search/template", AuthMiddleware("search.SearchDSL"), ESMiddleware, search.ListSearchTemplates)
+	r.GET("/es/_search/template/:target", AuthMiddleware("search.SearchDSL"), ESMiddleware, search.GetSearchTemplate)
+	r.POST("/es/_search/template/:target", AuthMiddleware("search.SearchDSL"), ESMiddleware, search.CreateSearchTemplate)
+	r.PUT("/es/_search/template/:target", AuthMiddleware("search.SearchDSL"), ESMiddleware, search.UpdateSearchTemplate)
+	r.DELETE("/es/_search/template/:target", AuthMiddleware("search.SearchDSL"), ESMiddleware, search.DeleteSearchTemplate)
+	r.POST("/es/:target/_search/template", AuthMiddleware("search.SearchDSL"), ESMiddleware, IndexAliasMiddleware, search.RenderAndSearchTemplate)
 	r.POST("/es/:target/_delete_by_query", AuthMiddleware("search.DeleteByQuery"), IndexAliasMiddleware, search.DeleteByQuery)
 
 	r.GET("/es/_index_template", AuthMiddleware("index.ListTemplate"), ESMiddleware, index.ListTemplate)
@@ -183,6 +190,10 @@ func SetRoutes(r *gin.Engine) {
 	r.POST("/es/_aliases", AuthMiddleware("index.AddOrRemoveESAlias"), ESMiddleware, index.AddOrRemoveESAlias)
 
 	r.GET("/es/_alias", AuthMiddleware("index.GetESAliases"), ESMiddleware, index.GetESAliases)
+
+	r.GET("/es/_synonyms", AuthMiddleware("index.List"), ESMiddleware, index.ListSynonyms)
+	r.GET("/es/_synonyms/:target", AuthMiddleware("index.Get"), ESMiddleware, index.GetSynonym)
+	r.POST("/es/_synonyms/:target", AuthMiddleware("index.Create"), ESMiddleware, index.ReloadSynonym)
 	r.GET("/es/:target/_alias", AuthMiddleware("index.GetESAliases"), ESMiddleware, index.GetESAliases)
 	r.GET("/es/_alias/:target_alias", AuthMiddleware("index.GetESAliases"), ESMiddleware, index.GetESAliases)
 

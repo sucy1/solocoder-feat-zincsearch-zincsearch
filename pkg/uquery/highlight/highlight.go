@@ -19,13 +19,26 @@ import (
 	"github.com/zincsearch/zincsearch/pkg/meta"
 )
 
+const DefaultFragmentSize = 200
+const DefaultPreTag = "<em>"
+const DefaultPostTag = "</em>"
+
 func Request(highlight *meta.Highlight) error {
-	if len(highlight.Fields) == 0 {
+	if highlight == nil || len(highlight.Fields) == 0 {
 		return nil
 	}
 
 	if highlight.NumberOfFragments == 0 {
 		highlight.NumberOfFragments = 3
+	}
+	if highlight.FragmentSize == 0 {
+		highlight.FragmentSize = DefaultFragmentSize
+	}
+	if len(highlight.PreTags) == 0 {
+		highlight.PreTags = []string{DefaultPreTag}
+	}
+	if len(highlight.PostTags) == 0 {
+		highlight.PostTags = []string{DefaultPostTag}
 	}
 	for _, field := range highlight.Fields {
 		if field.FragmentSize == 0 && highlight.FragmentSize > 0 {
@@ -33,6 +46,12 @@ func Request(highlight *meta.Highlight) error {
 		}
 		if field.NumberOfFragments == 0 && highlight.NumberOfFragments > 0 {
 			field.NumberOfFragments = highlight.NumberOfFragments
+		}
+		if len(field.PreTags) == 0 && len(highlight.PreTags) > 0 {
+			field.PreTags = highlight.PreTags
+		}
+		if len(field.PostTags) == 0 && len(highlight.PostTags) > 0 {
+			field.PostTags = highlight.PostTags
 		}
 	}
 
